@@ -42,7 +42,6 @@ jobs:
           PWN=${{ steps.source.outputs.pwn }}
           echo "Patching file: $PWN"
           
-          # Простая и безопасная вставка
           if ! grep -q "new srv;" "$PWN"; then
             sed -i 's/gmx_time;/gmx_time;\nnew srv;/' "$PWN"
             echo "Added new srv;"
@@ -72,8 +71,9 @@ jobs:
           echo "Source: $PWN"
           echo "Compiler: $PAWNCC"
 
-          # Исправляем пути в #include
-          find "$ROOT" -type f \( -name "*.pwn" -o -name "*.inc" \) -exec sed -i 's|\\|/|g' {} +
+          # Исправляем ТОЛЬКО пути в #include (не трогаем остальной код)
+          find "$ROOT" -type f \( -name "*.pwn" -o -name "*.inc" \) \
+            -exec sed -i '/^[[:space:]]*#include/s|\\|/|g' {} +
 
           mkdir -p output
 
