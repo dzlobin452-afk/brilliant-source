@@ -29,45 +29,29 @@ jobs:
         id: source
         run: |
           PWN=$(find project -type f -name brilliant.pwn | head -n 1)
-
           if [ -z "$PWN" ]; then
             echo "ERROR: brilliant.pwn not found"
             exit 1
           fi
+          echo "pwn=$PWN" >> $GITHUB_OUTPUT
+          echo "root=$(dirname $PWN)/.." >> $GITHUB_OUTPUT
+          echo "Found source: $PWN"
 
-          echo "pwn=$PWN" >> "$GITHUB_OUTPUT"
-          echo "root=$(dirname "$PWN")/.." >> "$GITHUB_OUTPUT"
-          echo "Found: $PWN"
-
-      - name: Fix missing symbols
+      - name: Fix srv
         run: |
-          PWN="${{ steps.source.outputs.pwn }}"
+          PWN=${{ steps.source.outputs.pwn }}
+          echo "Patching file: $PWN"
           
-          echo "=== Before patch ==="
-          grep -n "gmx_time" "$PWN" | head -3 || true
-          
-          # Добавляем new srv; только если его ещё нет
-          if ! grep -q 'new srv;' "$PWN"; then
-            # Используем python для надёжной вставки (без проблем с sed)
-            python3 -c "
-import sys
-path = sys.argv[1]
-with open(path, 'r', encoding='utf-8', errors='replace') as f:
-    content = f.read()
-if 'new srv;' not in content:
-    content = content.replace('gmx_time;', 'gmx_time;\nnew srv;', 1)
-    with open(path, 'w', encoding='utf-8', errors='replace') as f:
-        f.write(content)
-    print('Patched: added new srv;')
-else:
-    print('new srv; already present')
-" "$PWN"
+          # Простая и безопасная вставка
+          if ! grep -q "new srv;" "$PWN"; then
+            sed -i 's/gmx_time;/gmx_time;\nnew srv;/' "$PWN"
+            echo "Added new srv;"
           else
             echo "new srv; already exists"
           fi
-
-          echo "=== After patch ==="
-          grep -n "new srv;" "$PWN" || echo "WARNING: srv still missing"
+          
+          echo "Check:"
+          grep -n "new srv;" "$PWN" || echo "NOT FOUND"
 
       - name: Download Pawn compiler
         run: |
@@ -75,45 +59,29 @@ else:
 
       - name: Build Pawn compiler
         run: |
-          cmake -S pawn-compiler/source/compiler \
-            -B build-pawn \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_FLAGS=-m32 \
-            -DCMAKE_EXE_LINKER_FLAGS=-m32 \
-            -DCMAKE_SHARED_LINKER_FLAGS=-m32
-
+          cmake -S pawn-compiler/source/compiler -B build-pawn -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS=-m32 -DCMAKE_EXE_LINKER_FLAGS=-m32 -DCMAKE_SHARED_LINKER_FLAGS=-m32
           cmake --build build-pawn --target pawncc -j2
 
       - name: Compile Brilliant
         run: |
           PAWNCC=$(find build-pawn -type f -name pawncc -perm -111 | head -n 1)
+          ROOT=${{ steps.source.outputs.root }}
+          PWN=${{ steps.source.outputs.pwn }}
 
-          if [ -z "$PAWNCC" ]; then
-            echo "ERROR: pawncc not found"
-            exit 1
-          fi
-
-          ROOT="${{ steps.source.outputs.root }}"
-          PWN="${{ steps.source.outputs.pwn }}"
-
-          echo "Project root: $ROOT"
+          echo "Root: $ROOT"
           echo "Source: $PWN"
           echo "Compiler: $PAWNCC"
 
-          # Convert Windows include paths to Linux paths
-          find "$ROOT" -type f \( -name '*.pwn' -o -name '*.inc' \) \
-            -exec sed -i 's|\\|/|g' {} +
+          # Исправляем пути в #include
+          find "$ROOT" -type f \( -name "*.pwn" -o -name "*.inc" \) -exec sed -i 's|\\|/|g' {} +
 
           mkdir -p output
 
-          # Собираем include-пути
           INCLUDES="-i$ROOT/pawno/include -i$ROOT/include"
-          
-          while IFS= read -r DIR; do
+          for DIR in $(find "$ROOT" -type f -name "*.inc" -printf "%h\n" | sort -u); do
             INCLUDES="$INCLUDES -i$DIR"
-          done < <(find "$ROOT" -type f -name '*.inc' -printf '%h\n' | sort -u)
+          done
 
-          echo "Running compiler..."
           "$PAWNCC" "$PWN" $INCLUDES -ooutput/brilliant.amx
 
       - name: Upload AMX
