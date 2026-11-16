@@ -37,25 +37,37 @@ jobs:
 
           echo "pwn=$PWN" >> "$GITHUB_OUTPUT"
           echo "root=$(dirname "$PWN")/.." >> "$GITHUB_OUTPUT"
+          echo "Found: $PWN"
 
       - name: Fix missing symbols
         run: |
           PWN="${{ steps.source.outputs.pwn }}"
-          ROOT="${{ steps.source.outputs.root }}"
-
-          echo "Patching $PWN ..."
-
-          # 1. Добавляем объявление переменной srv, если её нет
-          if ! grep -q "new srv;" "$PWN"; then
-            # Вставляем после строки с gmx_time;
-            sed -i '/gmx_time;/a new srv;' "$PWN"
-            echo "Added: new srv;"
+          
+          echo "=== Before patch ==="
+          grep -n "gmx_time" "$PWN" | head -3 || true
+          
+          # Добавляем new srv; только если его ещё нет
+          if ! grep -q 'new srv;' "$PWN"; then
+            # Используем python для надёжной вставки (без проблем с sed)
+            python3 -c "
+import sys
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8', errors='replace') as f:
+    content = f.read()
+if 'new srv;' not in content:
+    content = content.replace('gmx_time;', 'gmx_time;\nnew srv;', 1)
+    with open(path, 'w', encoding='utf-8', errors='replace') as f:
+        f.write(content)
+    print('Patched: added new srv;')
+else:
+    print('new srv; already present')
+" "$PWN"
           else
             echo "new srv; already exists"
           fi
 
-          # Проверка
-          grep -n "new srv;" "$PWN" || echo "WARNING: srv not found after patch"
+          echo "=== After patch ==="
+          grep -n "new srv;" "$PWN" || echo "WARNING: srv still missing"
 
       - name: Download Pawn compiler
         run: |
@@ -72,8 +84,6 @@ jobs:
 
           cmake --build build-pawn --target pawncc -j2
 
-          find build-pawn -type f -name pawncc
-
       - name: Compile Brilliant
         run: |
           PAWNCC=$(find build-pawn -type f -name pawncc -perm -111 | head -n 1)
@@ -88,22 +98,23 @@ jobs:
 
           echo "Project root: $ROOT"
           echo "Source: $PWN"
+          echo "Compiler: $PAWNCC"
 
           # Convert Windows include paths to Linux paths
           find "$ROOT" -type f \( -name '*.pwn' -o -name '*.inc' \) \
-            -exec sed -i '/^[[:space:]]*#include/s|\\|/|g' {} +
+            -exec sed -i 's|\\|/|g' {} +
 
           mkdir -p output
 
-          INCLUDES=()
-          INCLUDES+=("-i$ROOT/pawno/include")
-          INCLUDES+=("-i$ROOT/include")
+          # Собираем include-пути
+          INCLUDES="-i$ROOT/pawno/include -i$ROOT/include"
+          
+          while IFS= read -r DIR; do
+            INCLUDES="$INCLUDES -i$DIR"
+          done < <(find "$ROOT" -type f -name '*.inc' -printf '%h\n' | sort -u)
 
-          while IFS= read -r -d '' DIR; do
-            INCLUDES+=("-i$DIR")
-          done < <(find "$ROOT" -type f -name '*.inc' -printf '%h\0' | sort -zu)
-
-          "$PAWNCC" "\( PWN" " \){INCLUDES[@]}" -ooutput/brilliant.amx
+          echo "Running compiler..."
+          "$PAWNCC" "$PWN" $INCLUDES -ooutput/brilliant.amx
 
       - name: Upload AMX
         uses: actions/upload-artifact@v4
