@@ -12,13 +12,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip cmake build-essential git
+          sudo apt-get install -y unzip cmake build-essential gcc-multilib g++-multilib git
 
       - name: Extract project
         run: |
@@ -29,7 +29,12 @@ jobs:
         id: source
         run: |
           PWN=$(find project -type f -name brilliant.pwn | head -n 1)
-          test -n "$PWN" || { echo "brilliant.pwn not found"; exit 1; }
+
+          if [ -z "$PWN" ]; then
+            echo "ERROR: brilliant.pwn not found"
+            exit 1
+          fi
+
           echo "pwn=$PWN" >> "$GITHUB_OUTPUT"
           echo "root=$(dirname "$PWN")/.." >> "$GITHUB_OUTPUT"
 
@@ -39,25 +44,39 @@ jobs:
 
       - name: Build Pawn compiler
         run: |
-          test -f pawn-compiler/source/compiler/CMakeLists.txt
-          cmake -S pawn-compiler/source/compiler -B build-pawn -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-pawn -j2
-          find build-pawn -type f -name 'pawncc*'
+          cmake -S pawn-compiler/source/compiler \
+            -B build-pawn \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS=-m32 \
+            -DCMAKE_EXE_LINKER_FLAGS=-m32 \
+            -DCMAKE_SHARED_LINKER_FLAGS=-m32
+
+          cmake --build build-pawn --target pawncc -j2
+
+          find build-pawn -type f -name pawncc
 
       - name: Compile Brilliant
         run: |
           PAWNCC=$(find build-pawn -type f -name pawncc -perm -111 | head -n 1)
-          test -n "$PAWNCC" || { echo "pawncc not found"; exit 1; }
+
+          if [ -z "$PAWNCC" ]; then
+            echo "ERROR: pawncc not found"
+            exit 1
+          fi
+
           ROOT="${{ steps.source.outputs.root }}"
           mkdir -p output
+
           INCLUDES=()
+
           while IFS= read -r -d '' DIR; do
             INCLUDES+=("-i$DIR")
           done < <(find "$ROOT" -type f -name '*.inc' -printf '%h\0' | sort -zu)
+
           "$PAWNCC" "${{ steps.source.outputs.pwn }}" "${INCLUDES[@]}" -ooutput/brilliant.amx
 
       - name: Upload AMX
         uses: actions/upload-artifact@v4
         with:
           name: brilliant-amx
-          path: output/brilliant.amx     
+          path: output/brilliant.amx
