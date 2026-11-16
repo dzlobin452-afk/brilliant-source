@@ -1,4 +1,3 @@
-
 name: Compile Brilliant
 
 on:
@@ -47,11 +46,4 @@ jobs:
           INCLUDES=()
           while IFS= read -r -d '' DIR; do
             INCLUDES+=("-i$DIR")
-          done < <(find "$ROOT" -type f -name '*.inc' -printf '%h\0' | sort -zu)
-          "$PAWNCC" "${{ steps.source.outputs.pwn }}" "${INCLUDES[@]}" -ooutput/brilliant.amx
-
-      - name: Upload AMX
-        uses: actions/upload-artifact@v4
-        with:
-          name: brilliant-amx
-          path: output/brilliant.amx
+          done < <(find "$ROOT" -type
