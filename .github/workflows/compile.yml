@@ -29,28 +29,14 @@ jobs:
         id: source
         run: |
           PWN=$(find project -type f -name brilliant.pwn | head -n 1)
+
           if [ -z "$PWN" ]; then
             echo "ERROR: brilliant.pwn not found"
             exit 1
           fi
-          echo "pwn=$PWN" >> $GITHUB_OUTPUT
-          echo "root=$(dirname $PWN)/.." >> $GITHUB_OUTPUT
-          echo "Found source: $PWN"
 
-      - name: Fix srv
-        run: |
-          PWN=${{ steps.source.outputs.pwn }}
-          echo "Patching file: $PWN"
-          
-          if ! grep -q "new srv;" "$PWN"; then
-            sed -i 's/gmx_time;/gmx_time;\nnew srv;/' "$PWN"
-            echo "Added new srv;"
-          else
-            echo "new srv; already exists"
-          fi
-          
-          echo "Check:"
-          grep -n "new srv;" "$PWN" || echo "NOT FOUND"
+          echo "pwn=$PWN" >> "$GITHUB_OUTPUT"
+          echo "root=$(dirname "$PWN")/.." >> "$GITHUB_OUTPUT"
 
       - name: Download Pawn compiler
         run: |
@@ -58,31 +44,46 @@ jobs:
 
       - name: Build Pawn compiler
         run: |
-          cmake -S pawn-compiler/source/compiler -B build-pawn -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS=-m32 -DCMAKE_EXE_LINKER_FLAGS=-m32 -DCMAKE_SHARED_LINKER_FLAGS=-m32
+          cmake -S pawn-compiler/source/compiler \
+            -B build-pawn \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS=-m32 \
+            -DCMAKE_EXE_LINKER_FLAGS=-m32 \
+            -DCMAKE_SHARED_LINKER_FLAGS=-m32
+
           cmake --build build-pawn --target pawncc -j2
+
+          find build-pawn -type f -name 'pawncc*'
 
       - name: Compile Brilliant
         run: |
           PAWNCC=$(find build-pawn -type f -name pawncc -perm -111 | head -n 1)
-          ROOT=${{ steps.source.outputs.root }}
-          PWN=${{ steps.source.outputs.pwn }}
 
-          echo "Root: $ROOT"
+          if [ -z "$PAWNCC" ]; then
+            echo "ERROR: pawncc not found"
+            exit 1
+          fi
+
+          ROOT="${{ steps.source.outputs.root }}"
+          PWN="${{ steps.source.outputs.pwn }}"
+
+          echo "Project root: $ROOT"
           echo "Source: $PWN"
-          echo "Compiler: $PAWNCC"
 
-          # Исправляем ТОЛЬКО пути в #include (не трогаем остальной код)
-          find "$ROOT" -type f \( -name "*.pwn" -o -name "*.inc" \) \
+          find "$ROOT" -type f \( -name '*.pwn' -o -name '*.inc' \) \
             -exec sed -i '/^[[:space:]]*#include/s|\\|/|g' {} +
 
           mkdir -p output
 
-          INCLUDES="-i$ROOT/pawno/include -i$ROOT/include"
-          for DIR in $(find "$ROOT" -type f -name "*.inc" -printf "%h\n" | sort -u); do
-            INCLUDES="$INCLUDES -i$DIR"
-          done
+          INCLUDES=()
+          INCLUDES+=("-i$ROOT/pawno/include")
+          INCLUDES+=("-i$ROOT/include")
 
-          "$PAWNCC" "$PWN" $INCLUDES -ooutput/brilliant.amx
+          while IFS= read -r -d '' DIR; do
+            INCLUDES+=("-i$DIR")
+          done < <(find "$ROOT" -type f -name '*.inc' -printf '%h\0' | sort -zu)
+
+          "$PAWNCC" "$PWN" "${INCLUDES[@]}" -ooutput/brilliant.amx
 
       - name: Upload AMX
         uses: actions/upload-artifact@v4
