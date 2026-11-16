@@ -38,6 +38,25 @@ jobs:
           echo "pwn=$PWN" >> "$GITHUB_OUTPUT"
           echo "root=$(dirname "$PWN")/.." >> "$GITHUB_OUTPUT"
 
+      - name: Fix missing symbols
+        run: |
+          PWN="${{ steps.source.outputs.pwn }}"
+          ROOT="${{ steps.source.outputs.root }}"
+
+          echo "Patching $PWN ..."
+
+          # 1. Добавляем объявление переменной srv, если её нет
+          if ! grep -q "new srv;" "$PWN"; then
+            # Вставляем после строки с gmx_time;
+            sed -i '/gmx_time;/a new srv;' "$PWN"
+            echo "Added: new srv;"
+          else
+            echo "new srv; already exists"
+          fi
+
+          # Проверка
+          grep -n "new srv;" "$PWN" || echo "WARNING: srv not found after patch"
+
       - name: Download Pawn compiler
         run: |
           git clone --depth 1 https://github.com/pawn-lang/compiler.git pawn-compiler
@@ -84,7 +103,7 @@ jobs:
             INCLUDES+=("-i$DIR")
           done < <(find "$ROOT" -type f -name '*.inc' -printf '%h\0' | sort -zu)
 
-          "$PAWNCC" "$PWN" "${INCLUDES[@]}" -ooutput/brilliant.amx
+          "$PAWNCC" "\( PWN" " \){INCLUDES[@]}" -ooutput/brilliant.amx
 
       - name: Upload AMX
         uses: actions/upload-artifact@v4
