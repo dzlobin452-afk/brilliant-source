@@ -36,9 +36,7 @@ jobs:
 
       - name: Build Pawn compiler
         run: |
-          git clone --depth 1 --branch 3.10.10 https://github.com/pawn-lang/compiler.git pawn-compiler
-          cmake -S pawn-compiler/source/compiler -B pawn-compiler/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build pawn-compiler/build -j2
+          git clone --depth 1 --branch v3.10.10 https://github.com/pawn-lang/compiler.git pawn-compiler
 
       - name: Compile
         run: |
