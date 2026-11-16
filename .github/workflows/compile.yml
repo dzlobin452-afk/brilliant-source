@@ -1,0 +1,59 @@
+
+name: Compile Brilliant
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'brilliant-source.zip'
+      - '.github/workflows/compile.yml'
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract project ZIP
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip cmake build-essential git
+          mkdir project
+          unzip -q brilliant-source.zip -d project
+
+      - name: Find source
+        id: source
+        run: |
+          PWN=$(find project -type f -name brilliant.pwn | head -n 1)
+          if [ -z "$PWN" ]; then
+            echo "brilliant.pwn not found in ZIP"
+            exit 1
+          fi
+          echo "pwn=$PWN" >> "$GITHUB_OUTPUT"
+          echo "root=$(dirname "$PWN")/.." >> "$GITHUB_OUTPUT"
+
+      - name: Build Pawn compiler
+        run: |
+          git clone --depth 1 --branch 3.10.10 https://github.com/pawn-lang/compiler.git pawn-compiler
+          cmake -S pawn-compiler/source/compiler -B pawn-compiler/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build pawn-compiler/build -j2
+
+      - name: Compile
+        run: |
+          PAWNCC=$(find pawn-compiler/build -type f -name pawncc -perm -111 | head -n 1)
+          test -n "$PAWNCC"
+          ROOT="${{ steps.source.outputs.root }}"
+          mkdir -p output
+          INCLUDES=()
+          while IFS= read -r -d '' DIR; do
+            INCLUDES+=("-i$DIR")
+          done < <(find "$ROOT" -type f -name '*.inc' -printf '%h\0' | sort -zu)
+          "$PAWNCC" "${{ steps.source.outputs.pwn }}" "${INCLUDES[@]}" -ooutput/brilliant.amx
+
+      - name: Upload AMX
+        uses: actions/upload-artifact@v4
+        with:
+          name: brilliant-amx
+          path: output/brilliant.amx
