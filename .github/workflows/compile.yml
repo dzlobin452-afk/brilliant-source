@@ -65,15 +65,26 @@ jobs:
           fi
 
           ROOT="${{ steps.source.outputs.root }}"
+          PWN="${{ steps.source.outputs.pwn }}"
+
+          echo "Project root: $ROOT"
+          echo "Source: $PWN"
+
+          # Convert Windows include paths to Linux paths
+          find "$ROOT" -type f \( -name '*.pwn' -o -name '*.inc' \) \
+            -exec sed -i '/^[[:space:]]*#include/s|\\|/|g' {} +
+
           mkdir -p output
 
           INCLUDES=()
+          INCLUDES+=("-i$ROOT/pawno/include")
+          INCLUDES+=("-i$ROOT/include")
 
           while IFS= read -r -d '' DIR; do
             INCLUDES+=("-i$DIR")
           done < <(find "$ROOT" -type f -name '*.inc' -printf '%h\0' | sort -zu)
 
-          "$PAWNCC" "${{ steps.source.outputs.pwn }}" "${INCLUDES[@]}" -ooutput/brilliant.amx
+          "$PAWNCC" "$PWN" "${INCLUDES[@]}" -ooutput/brilliant.amx
 
       - name: Upload AMX
         uses: actions/upload-artifact@v4
